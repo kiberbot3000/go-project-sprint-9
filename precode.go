@@ -13,7 +13,6 @@ import (
 // вызывается функция fn. Она служит для подсчёта количества и суммы
 // сгенерированных чисел.
 func Generator(ctx context.Context, ch chan<- int64, fn func(int64)) {
-	// 1. Функция Generator
 	defer close(ch)
 	var i int64 = 1
 	for {
@@ -23,42 +22,43 @@ func Generator(ctx context.Context, ch chan<- int64, fn func(int64)) {
 		case ch <- i:
 			fn(i)
 			i++
-			time.Sleep(100 * time.Millisecond) // для примера, чтобы генерация была не мгновенной
 		}
 	}
 }
 
 // Worker читает число из канала in и пишет его в канал out.
 func Worker(in <-chan int64, out chan<- int64) {
-	// 2. Функция Worker
 	defer close(out)
 	for n := range in {
 		out <- n
+		time.Sleep(1 * time.Millisecond) // задержка 1 миллисекунда
 	}
 }
 
 func main() {
 	chIn := make(chan int64)
 
-	// 3. Создание контекста
+	// Создание контекста
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// для проверки будем считать количество и сумму отправленных чисел
 	var inputSum int64   // сумма сгенерированных чисел
 	var inputCount int64 // количество сгенерированных чисел
+	var mu sync.Mutex    // мьютекс для защиты переменных
 
 	// генерируем числа, считая параллельно их количество и сумму
 	go Generator(ctx, chIn, func(i int64) {
+		mu.Lock()
 		inputSum += i
 		inputCount++
+		mu.Unlock()
 	})
 
 	const NumOut = 5 // количество обрабатывающих горутин и каналов
+
 	// outs — слайс каналов, куда будут записываться числа из chIn
 	outs := make([]chan int64, NumOut)
 	for i := 0; i < NumOut; i++ {
-		// создаём каналы и для каждого из них вызываем горутину Worker
 		outs[i] = make(chan int64)
 		go Worker(chIn, outs[i])
 	}
@@ -70,7 +70,7 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	// 4. Собираем числа из каналов outs
+	// Собираем числа из каналов outs
 	for i := 0; i < NumOut; i++ {
 		wg.Add(1)
 		go func(i int) {
@@ -92,15 +92,17 @@ func main() {
 	var count int64 // количество чисел результирующего канала
 	var sum int64   // сумма чисел результирующего канала
 
-	// 5. Читаем числа из результирующего канала
+	// Читаем числа из результирующего канала
 	for n := range chOut {
 		sum += n
 		count++
 	}
 
+	mu.Lock()
 	fmt.Println("Количество чисел", inputCount, count)
 	fmt.Println("Сумма чисел", inputSum, sum)
 	fmt.Println("Разбивка по каналам", amounts)
+	mu.Unlock()
 
 	// проверка результатов
 	if inputSum != sum {
